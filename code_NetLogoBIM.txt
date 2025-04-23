@@ -1,0 +1,202 @@
+extensions [gis]
+
+globals [borders-layer buildings-layer doors-layer paths-layer public_space-layer fire-percent number-dead number-escaped number-in-evacuation simulation-time]
+turtles-own [ifescaped? isdead? at-goal?]
+patches-own [target? onfire? risk?]
+
+to setup
+  clear-all
+  set simulation-time 0
+  ask patches [ set pcolor white ]
+
+  set borders-layer gis:load-dataset "borders.shp"
+  set buildings-layer gis:load-dataset "buildings.shp"
+  set doors-layer gis:load-dataset "doors.shp"
+  set paths-layer gis:load-dataset "paths.shp"
+  set public_space-layer gis:load-dataset "public_space.shp"
+  create-borders
+  create-buildings
+  create-paths
+  create-doors
+  create-public_space
+  spawn-people
+  start-fire
+  reset-ticks
+end
+
+to create-borders
+  ask patches gis:intersecting borders-layer [
+    set pcolor black
+  ]
+end
+
+to create-buildings
+  ask patches gis:intersecting buildings-layer [
+    set pcolor brown
+  ]
+end
+
+to create-paths
+ ask patches gis:intersecting paths-layer [
+    set pcolor yellow
+  ]
+end
+
+to create-doors
+  ask patches gis:intersecting doors-layer [
+    if random-float 1 < 0.3 [
+      set pcolor gray
+    ]
+    set pcolor blue
+
+    sprout 1 [
+      set shape "square"
+      set color blue
+      set size 0.3
+    ]
+  ]
+  ask patches with [pxcor >= -5 and pxcor <= -3 and pycor = 16] [
+    set target? true
+  ]
+    let available-doors patches with [pcolor = brown]  
+  repeat number-of-exits [
+    let door-patch one-of available-doors  
+    if door-patch != nobody [
+      ask door-patch [
+        set pcolor blue 
+      ]
+    ]
+  ]
+end
+
+to create-public_space
+  ask patches gis:intersecting public_space-layer [
+    set pcolor green
+  ]
+end
+
+to spawn-people
+  create-turtles people [  ;; 
+    set shape "person"
+    set color pink
+    set size 2
+    set isdead? false
+    set ifescaped? false ;;
+    move-to one-of patches with [pcolor = white]
+  ]
+end
+
+to start-fire
+  ask one-of patches with [pcolor = white] [
+    set onfire? true
+    ask patches with [onfire? = true] [
+      set pcolor red]
+  ]
+end
+
+to go
+  spread-fire;
+  check-ifescaped 
+  check-death
+  choose-target 
+  move-turtles
+  if number-escaped + number-dead = people [ 
+  set simulation-time ticks
+    stop]  
+  tick
+  tick-advance 1
+end
+
+to check-ifescaped 
+  ask turtles [ 
+    let target-patch min-one-of patches with [target? = true] [distance myself] 
+    if patch-here = target-patch [ 
+    set ifescaped? true ; Oznacz go jako ewakuowanego (ifescaped? = true).
+    set number-escaped number-escaped + 1
+    die 
+    ]
+  ]
+end
+
+to check-death
+  ask turtles [ 
+    if pcolor = red [ 
+      set isdead? true  
+      set number-dead number-dead + 1 
+      die 
+    ]
+  ]
+end
+
+to spread-fire
+  set fire-percent 15
+  ask patches with [pcolor = red] [ 
+    ask neighbors [ 
+    set risk? true 
+    ]
+  ]
+  ask patches with [risk? = true ] [ 
+  if random 100 < fire-spread-rate [ 
+      set onfire? true 
+      set pcolor red 
+    ]
+  ]
+end
+
+to move-turtles
+ask turtles [
+let target-patch patch 0 0
+    if pcolor = green [
+      set number-escaped number-escaped + 1
+      die
+    ]
+     if [pcolor] of patch-ahead 1 = brown [
+
+    find-blue-doors 
+    ]
+    if random 100 < panic-level [
+    rt random 90 - 45
+    ]
+    ifelse ([pcolor] of patch-ahead 1 = white) or
+           ([pcolor] of patch-ahead 1 = yellow) or
+           ([pcolor] of patch-ahead 1 = green)
+    [fd speed]
+    [avoid-obstacles]
+    if patch-here = target-patch [
+    set number-escaped number-escaped + 1
+    die]
+    if [pcolor] of patch-ahead 1 = blue
+    [fd speed]
+    if random 100 < smoke-density [ rt random 90 - 45 ]  
+  ]
+end
+
+to find-blue-doors
+  let door-patches patches with [pcolor = blue]
+  let closest-door min-one-of door-patches [distance self]
+
+  if any? door-patches [
+    face closest-door
+    fd 0.5 ;; Move towards the closest blue door
+  ]
+end
+
+to avoid-obstacles
+  let alternatives patches in-radius 1 with [pcolor = white]
+  let best-patch one-of alternatives
+  if any? alternatives [
+    face best-patch
+  ]
+  fd 0.2
+end
+
+to choose-target
+  ask turtles [
+let target-patch patch 0 0
+let doors-patch patch 0 0
+    if ycor < -1 [
+      face doors-patch]
+    if ycor >= -1 [
+      face target-patch]
+  ]
+end
